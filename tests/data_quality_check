@@ -1,0 +1,511 @@
+-- =========================================================
+-- Data Warehouse: Data Quality Checks
+-- =========================================================
+-- Purpose:
+--     This script performs data quality checks on the
+--     Bronze and Silver layers of the Data Warehouse.
+--
+-- Layers:
+--     Bronze -> Raw data loaded from source systems
+--     Silver -> Cleaned and transformed data
+--
+-- Checks include:
+--     1. NULL and duplicate values
+--     2. Extra spaces
+--     3. Data standardization and consistency
+--     4. Referential integrity
+--     5. Invalid or out-of-range dates
+--     6. Negative or NULL values
+--     7. Business rule validation
+--     8. Data consistency between related columns
+--     9. Bronze vs Silver validation
+--
+-- Expected Result:
+--     Queries used for validation should return no rows
+--     unless the result identifies a known data-quality issue.
+-- =========================================================
+
+
+USE DataWarehouse;
+GO
+
+
+-- =========================================================
+-- TABLE 1: bronze.crm_cust_info
+-- =========================================================
+
+
+-- ---------------------------------------------------------
+-- Check 1: Inspect Customer Data
+-- ---------------------------------------------------------
+SELECT *
+FROM bronze.crm_cust_info;
+
+
+-- ---------------------------------------------------------
+-- Check 2: NULL or Duplicate Customer IDs
+-- Expectation:
+--     cst_id should be unique and should not contain NULLs.
+-- ---------------------------------------------------------
+
+-- Check for duplicate customer IDs
+SELECT
+    cst_id,
+    COUNT(*) AS duplicate_count
+FROM bronze.crm_cust_info
+GROUP BY cst_id
+HAVING COUNT(*) > 1;
+
+-- Check for NULL customer IDs
+SELECT *
+FROM bronze.crm_cust_info
+WHERE cst_id IS NULL;
+
+
+-- ---------------------------------------------------------
+-- Check 3: Extra Spaces
+-- Expectation:
+--     First name and last name should not contain
+--     leading or trailing spaces.
+-- ---------------------------------------------------------
+
+SELECT
+    cst_firstname,
+    cst_lastname
+FROM bronze.crm_cust_info
+WHERE cst_firstname <> TRIM(cst_firstname)
+   OR cst_lastname <> TRIM(cst_lastname);
+
+
+-- ---------------------------------------------------------
+-- Check 4: Gender Standardization
+-- Expectation:
+--     Gender values should use consistent values.
+-- ---------------------------------------------------------
+
+SELECT DISTINCT
+    cst_gndr
+FROM bronze.crm_cust_info;
+
+
+-- ---------------------------------------------------------
+-- Check 5: Marital Status Standardization
+-- Expectation:
+--     Marital status values should be standardized.
+-- ---------------------------------------------------------
+
+SELECT DISTINCT
+    cst_material_status
+FROM bronze.crm_cust_info;
+
+
+-- ---------------------------------------------------------
+-- SILVER: Customer Data Validation
+-- ---------------------------------------------------------
+
+SELECT *
+FROM silver.crm_cust_info;
+
+
+-- Check that extra spaces were removed
+SELECT
+    cst_firstname,
+    cst_lastname
+FROM silver.crm_cust_info
+WHERE cst_firstname <> TRIM(cst_firstname)
+   OR cst_lastname <> TRIM(cst_lastname);
+
+
+
+-- =========================================================
+-- TABLE 2: bronze.crm_prd_info
+-- =========================================================
+
+
+-- ---------------------------------------------------------
+-- Check 1: Inspect Product Data
+-- ---------------------------------------------------------
+
+SELECT *
+FROM bronze.crm_prd_info;
+
+
+-- ---------------------------------------------------------
+-- Check 2: Duplicate Product IDs
+-- Expectation:
+--     prd_id should be unique.
+-- ---------------------------------------------------------
+
+SELECT
+    prd_id,
+    COUNT(*) AS duplicate_count
+FROM bronze.crm_prd_info
+GROUP BY prd_id
+HAVING COUNT(*) > 1;
+
+
+-- ---------------------------------------------------------
+-- Check 3: Product Cost Validation
+-- Expectation:
+--     Product cost should not be NULL or negative.
+-- ---------------------------------------------------------
+
+SELECT
+    prd_id,
+    prd_cost
+FROM bronze.crm_prd_info
+WHERE prd_cost < 0
+   OR prd_cost IS NULL;
+
+
+-- ---------------------------------------------------------
+-- Check 4: Product Line Standardization
+-- ---------------------------------------------------------
+
+SELECT DISTINCT
+    prd_line
+FROM bronze.crm_prd_info;
+
+
+-- ---------------------------------------------------------
+-- Check 5: Product Date Validation
+-- Expectation:
+--     Product start date should not be greater than
+--     product end date.
+-- ---------------------------------------------------------
+
+SELECT
+    prd_id,
+    prd_key,
+    prd_start_dt,
+    prd_end_dt
+FROM bronze.crm_prd_info
+WHERE prd_start_dt > prd_end_dt;
+
+
+-- ---------------------------------------------------------
+-- Check 6: Validate Specific Product Date
+-- ---------------------------------------------------------
+
+SELECT
+    prd_key,
+    prd_start_dt,
+    prd_end_dt
+FROM bronze.crm_prd_info
+WHERE prd_key = 'AC-HE-HL-U509-R';
+
+
+-- ---------------------------------------------------------
+-- SILVER: Product Data Validation
+-- ---------------------------------------------------------
+
+SELECT *
+FROM silver.crm_prd_info;
+
+
+-- Check product date consistency
+SELECT
+    prd_id,
+    prd_key,
+    prd_start_dt,
+    prd_end_dt
+FROM silver.crm_prd_info
+WHERE prd_start_dt > prd_end_dt;
+
+
+-- Check product cost
+SELECT
+    prd_id,
+    prd_cost
+FROM silver.crm_prd_info
+WHERE prd_cost < 0
+   OR prd_cost IS NULL;
+
+
+
+-- =========================================================
+-- TABLE 3: bronze.crm_sales_details
+-- =========================================================
+
+
+-- ---------------------------------------------------------
+-- Check 1: Inspect Sales Data
+-- ---------------------------------------------------------
+
+SELECT *
+FROM bronze.crm_sales_details;
+
+
+-- ---------------------------------------------------------
+-- Check 2: Product Key Referential Integrity
+-- Expectation:
+--     Every sales product key should exist in the
+--     Silver product table.
+-- ---------------------------------------------------------
+
+SELECT
+    sls_prd_key
+FROM bronze.crm_sales_details
+WHERE sls_prd_key NOT IN (
+    SELECT prd_key
+    FROM silver.crm_prd_info
+);
+
+
+-- ---------------------------------------------------------
+-- Check 3: Customer ID Referential Integrity
+-- Expectation:
+--     Every sales customer ID should exist in the
+--     Silver customer table.
+-- ---------------------------------------------------------
+
+SELECT
+    sls_cust_id
+FROM bronze.crm_sales_details
+WHERE sls_cust_id NOT IN (
+    SELECT cst_id
+    FROM silver.crm_cust_info
+);
+
+
+-- ---------------------------------------------------------
+-- Check 4: Order Date Validation
+-- Expectation:
+--     Order date should be greater than 0.
+-- ---------------------------------------------------------
+
+SELECT
+    sls_ord_num,
+    sls_order_dt
+FROM bronze.crm_sales_details
+WHERE sls_order_dt <= 0;
+
+
+-- ---------------------------------------------------------
+-- Check 5: Sales, Quantity and Price Consistency
+--
+-- Business Rule:
+--     Sales = Quantity × Price
+--
+-- Expectation:
+--     Sales, quantity and price should not be NULL,
+--     zero or negative.
+-- ---------------------------------------------------------
+
+SELECT
+    sls_ord_num,
+    sls_sales,
+    sls_quantity,
+    sls_price
+FROM bronze.crm_sales_details
+WHERE sls_sales <> sls_quantity * sls_price
+   OR sls_sales IS NULL
+   OR sls_quantity IS NULL
+   OR sls_price IS NULL
+   OR sls_sales <= 0
+   OR sls_quantity <= 0
+   OR sls_price <= 0;
+
+
+-- ---------------------------------------------------------
+-- Check 6: Order Date vs Ship Date
+-- Expectation:
+--     Order date should not be greater than ship date.
+-- ---------------------------------------------------------
+
+SELECT
+    sls_ord_num,
+    sls_order_dt,
+    sls_ship_dt
+FROM bronze.crm_sales_details
+WHERE sls_order_dt > sls_ship_dt;
+
+
+-- ---------------------------------------------------------
+-- SILVER: Sales Data Validation
+-- ---------------------------------------------------------
+
+SELECT *
+FROM silver.crm_sales_details;
+
+
+-- Check for extra spaces in order number
+SELECT
+    sls_ord_num
+FROM silver.crm_sales_details
+WHERE sls_ord_num <> TRIM(sls_ord_num);
+
+
+-- Check sales, quantity and price consistency
+SELECT
+    sls_ord_num,
+    sls_sales,
+    sls_quantity,
+    sls_price
+FROM silver.crm_sales_details
+WHERE sls_sales <> sls_quantity * sls_price
+   OR sls_sales IS NULL
+   OR sls_quantity IS NULL
+   OR sls_price IS NULL
+   OR sls_sales <= 0
+   OR sls_quantity <= 0
+   OR sls_price <= 0;
+
+
+
+-- =========================================================
+-- TABLE 4: bronze.erp_cust_az12
+-- =========================================================
+
+
+-- ---------------------------------------------------------
+-- Check 1: Inspect ERP Customer Data
+-- ---------------------------------------------------------
+
+SELECT *
+FROM bronze.erp_cust_az12;
+
+
+-- ---------------------------------------------------------
+-- Check 2: Customer ID Mapping
+--
+-- ERP customer IDs may contain the 'NAS' prefix.
+-- Remove the prefix before comparing with CRM customer keys.
+-- ---------------------------------------------------------
+
+SELECT
+    CASE
+        WHEN cid LIKE 'NAS%'
+            THEN SUBSTRING(cid, 4, LEN(cid))
+        ELSE cid
+    END AS cleaned_cid
+FROM bronze.erp_cust_az12
+WHERE
+    CASE
+        WHEN cid LIKE 'NAS%'
+            THEN SUBSTRING(cid, 4, LEN(cid))
+        ELSE cid
+    END IN (
+        SELECT cst_key
+        FROM bronze.crm_cust_info
+    );
+
+
+-- ---------------------------------------------------------
+-- Check 3: Customer Birth Date Validation
+-- Expectation:
+--     Birth date should be within a reasonable range
+--     and should not be in the future.
+-- ---------------------------------------------------------
+
+SELECT
+    cid,
+    bdate
+FROM bronze.erp_cust_az12
+WHERE bdate < '1924-01-01'
+   OR bdate > GETDATE();
+
+
+-- ---------------------------------------------------------
+-- Check 4: Gender Standardization
+-- ---------------------------------------------------------
+
+SELECT DISTINCT
+    gen
+FROM bronze.erp_cust_az12;
+
+
+-- ---------------------------------------------------------
+-- SILVER: ERP Customer Validation
+-- ---------------------------------------------------------
+
+SELECT *
+FROM silver.erp_cust_az12;
+
+
+
+-- =========================================================
+-- TABLE 5: bronze.erp_loc_a101
+-- =========================================================
+
+
+-- ---------------------------------------------------------
+-- Check 1: Inspect ERP Location Data
+-- ---------------------------------------------------------
+
+SELECT *
+FROM bronze.erp_loc_a101;
+
+
+-- ---------------------------------------------------------
+-- Check 2: Customer ID Formatting
+-- Expectation:
+--     Remove '-' characters from customer IDs.
+-- ---------------------------------------------------------
+
+SELECT
+    REPLACE(cid, '-', '') AS cleaned_cid
+FROM bronze.erp_loc_a101;
+
+
+-- ---------------------------------------------------------
+-- Check 3: Country Standardization
+-- ---------------------------------------------------------
+
+SELECT DISTINCT
+    cntry
+FROM bronze.erp_loc_a101;
+
+
+-- ---------------------------------------------------------
+-- SILVER: Country Standardization Check
+-- ---------------------------------------------------------
+
+SELECT DISTINCT
+    cntry
+FROM silver.erp_loc_a101;
+
+
+
+-- =========================================================
+-- TABLE 6: bronze.erp_pr_cat_g1v2
+-- =========================================================
+
+
+-- ---------------------------------------------------------
+-- Check 1: Inspect Product Category Data
+-- ---------------------------------------------------------
+
+SELECT *
+FROM bronze.erp_pr_cat_g1v2;
+
+
+-- ---------------------------------------------------------
+-- Check 2: Extra Spaces
+-- Expectation:
+--     Category, subcategory and maintenance values should
+--     not contain leading or trailing spaces.
+-- ---------------------------------------------------------
+
+SELECT
+    id,
+    cat,
+    subcat,
+    maintenance
+FROM bronze.erp_pr_cat_g1v2
+WHERE cat <> TRIM(cat)
+   OR subcat <> TRIM(subcat)
+   OR maintenance <> TRIM(maintenance);
+
+
+-- ---------------------------------------------------------
+-- SILVER: Product Category Validation
+-- ---------------------------------------------------------
+
+SELECT *
+FROM silver.erp_pr_cat_g1v2;
+
+
+-- =========================================================
+-- End of Data Quality Checks
+-- =========================================================
